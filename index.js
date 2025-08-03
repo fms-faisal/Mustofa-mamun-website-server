@@ -70,6 +70,7 @@ const authenticate = (req, res, next) => {
     req.user = verified;
     next(); // Token is valid, proceed to the route handler.
   } catch (err) {
+    console.error("JWT Verification Error:", err.message); // Added for better debugging
     res.status(400).send({ message: 'Invalid token.' });
   }
 };
@@ -91,8 +92,6 @@ async function initialize() {
       });
       console.log("Initial user created.");
     }
-
-    // You can add other initial data seeding here, like for courses.
 
   } catch (error) {
     console.error("Database connection failed:", error);
@@ -124,7 +123,7 @@ function registerRoutes() {
         if (!validPassword) {
             return res.status(400).send({ message: "Invalid credentials" });
         }
-        const token = jwt.sign({ email: user.email }, process.env.JWT_SECRET, { expiresIn: '1h' });
+        const token = jwt.sign({ email: user.email }, process.env.JWT_SECRET, { expiresIn: '8h' }); // Expiration set to 8 hours
         res.send({ message: "Login successful", token });
     } catch (error) {
         console.error("Login error:", error);
@@ -133,10 +132,8 @@ function registerRoutes() {
   });
 
   // --- Course Routes (Protected) ---
-  // These routes require a valid token to be accessed.
   app.get("/courses", async (req, res) => {
     try {
-      // FIX: Added .sort({ _id: -1 }) to return newest courses first.
       const courses = await courseCollection.find({}).sort({ _id: -1 }).toArray();
       res.send(courses);
     } catch (error) {
@@ -192,8 +189,6 @@ function registerRoutes() {
   });
 
   // --- File Routes (Public) ---
-  // FIX: The 'authenticate' middleware has been removed from these routes
-  // to match the original working code and resolve the 401 error.
   app.get("/files", async (req, res) => {
     try {
       const files = await fileCollection.find(req.query).toArray();
@@ -243,10 +238,9 @@ function registerRoutes() {
   app.put("/files/:id", upload.single('file'), async (req, res) => {
     try {
       const { title, type, course } = req.body;
-      let fileLink = req.body.link; // Keep existing link if no new file is uploaded
+      let fileLink = req.body.link;
 
       if (req.file) {
-        // If a new file is uploaded, upload it to Google Drive
         const fileMetadata = {
             name: req.file.originalname,
             parents: [process.env.GOOGLE_DRIVE_FOLDER_ID]
@@ -280,8 +274,6 @@ function registerRoutes() {
 
   app.delete("/files/:id", async (req, res) => {
     try {
-      // Note: This will delete the record from MongoDB, but not the file from Google Drive.
-      // Implementing file deletion from Drive would require getting the file ID and calling drive.files.delete().
       const result = await fileCollection.deleteOne({ _id: new ObjectId(req.params.id) });
       res.send(result);
     } catch (error) {
@@ -299,12 +291,32 @@ function registerRoutes() {
     }
   });
 
+  // FIX: Replaced with the more secure and explicit update logic.
   app.put("/profile", authenticate, async (req, res) => {
     try {
-      const result = await profileCollection.updateOne({}, { $set: req.body }, { upsert: true });
+      // Explicitly destructure the fields you expect from the frontend
+      const { name, title, bio1, bio2, teachingInterests, researchAreas } = req.body;
+
+      // Create an object with only the fields to be updated
+      const updatedFields = {
+        name,
+        title,
+        bio1,
+        bio2,
+        teachingInterests,
+        researchAreas,
+      };
+
+      // Use the $set operator to update only the specified fields
+      const result = await profileCollection.updateOne(
+        {}, // An empty filter matches the single document in the collection
+        { $set: updatedFields },
+        { upsert: true } // Creates the document if it doesn't exist
+      );
       res.send(result);
     } catch (error) {
-      res.status(500).send({ message: "Failed to update profile", error });
+      console.error("Profile update error:", error); // Log the specific error
+      res.status(500).send({ message: "Failed to update profile", error: error.message });
     }
   });
 
